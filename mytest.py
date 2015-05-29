@@ -1,14 +1,35 @@
-#¡/usr/bin/python
+#/usr/bin/python
 
 import sys
-import getopt
+import os
 
 def main(argv):
-	croppedImageDir = ""
-	originalImageDir = ""
 
-	try:
-		opts, args = getopt.getopt(argv)
-	except getopt.GetoptError:
-		print 'mytest.py --croppeddir <croppedfolder> --originaldir <originalfolder>'
+	# Check we have the correct arguments.
+	if len(argv) != 2:
+		print ("Usage: mytest.py CROPPED_DIR ORIGINAL_DIR")
+		sys.exit(2)
 
+	# Setup our directories.
+	croppedImageDir = argv[0]
+	originalImageDir = argv[1]
+
+	# Get list of images in cropped directory.
+	imageList = os.listdir(croppedImageDir)
+
+	# Loop through image names.
+	for imageName in imageList:
+		processImage(croppedImageDir + imageName, originalImageDir + imageName)
+
+		# Temporary break to limit to first result.
+		break
+
+	print ("Done.")
+
+def processImage(croppedImage, originalImage):
+
+	print (croppedImage)
+	print (originalImage)
+
+if __name__ == "__main__":
+	main(sys.argv[1:])
