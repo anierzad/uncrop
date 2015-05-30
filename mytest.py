@@ -6,9 +6,13 @@ import time
 import math
 import random
 
+from guppy import hpy
+
 from PIL import Image
 from PIL import ImageStat
 import PIL.ImageOps
+
+logFile = object()
 
 croppedImageDir = ""
 originalImageDir = ""
@@ -20,6 +24,12 @@ def main(argv):
 	if len(argv) != 3:
 		print ("Usage: mytest.py CROPPED_DIR ORIGINAL_DIR OUTPUT_DIR")
 		sys.exit(2)
+
+	# Setup logging.
+	global logFile
+	logFile = open("logFile.txt", "w")
+	logFile.truncate()
+	logFile.close()
 
 	# Setup our directories.
 	global croppedImageDir
@@ -58,16 +68,16 @@ def processImage(imageName):
 	return
 
 
-def existsInside(childImage, parentImage):
+def existsInside(childImage, parentImage, depth = 0):
+
+	# Time to give up?
+	if depth > 4:
+		return 0, object()
 
 	# Check is not smaller than child.
 	if parentImage.size[0] < childImage.size[0] or parentImage.size[1] < childImage.size[1]:
 		print "Parent is smaller than child!"
 		return
-
-	# Rinse!
-	parentImage.load()
-	childImage.load()
 
 	# Aim for 1000 pixels
 	multiplier = 1000.0 / float(parentImage.size[0])
@@ -78,12 +88,12 @@ def existsInside(childImage, parentImage):
 		parentNeWidth = math.trunc(parentImage.size[0] * multiplier)
 		parentNewSize = (parentNeWidth, int(parentNeWidth * aspectRatio))
 		print parentNewSize
-		parentImage = parentImage.resize(parentNewSize, Image.BILINEAR)
+		parentImage = parentImage.resize(parentNewSize, Image.LANCZOS)
 
 		childNewWidth = math.trunc(childImage.size[0] * multiplier)
 		childNewSize = (childNewWidth, int(childNewWidth * aspectRatio))
 		print childNewSize
-		childImage = childImage.resize(childNewSize, Image.BILINEAR)
+		childImage = childImage.resize(childNewSize, Image.LANCZOS)
 
 		parentImage.save("smParent.jpg")
 		childImage.save("smChild.jpg")
@@ -102,7 +112,7 @@ def existsInside(childImage, parentImage):
 	xPosChildSample = 0
 	yPosChildSample = 0
 	attempts = 0
-	variance = 5000
+	variance = 10000
 
 	while 1:
 		childSample = sampleImage(childImage, xPosChildSample, yPosChildSample, sampleSize, sampleSize)
@@ -110,8 +120,8 @@ def existsInside(childImage, parentImage):
 		if testSample(childSample, variance):
 			break
 
-		xPosChildSample = random.randint(int(chiWidth / 2), chiWidth - sampleSize)
-		yPosChildSample = random.randint(int(chiHeight / 2), chiHeight - sampleSize)
+		xPosChildSample = random.randint(0, chiWidth - sampleSize)
+		yPosChildSample = random.randint(0, chiHeight - sampleSize)
 
 		if attempts >= 10:
 			variance = variance - 100
@@ -123,40 +133,63 @@ def existsInside(childImage, parentImage):
 
 	print "Sample origin:", xPosChildSample, "x", yPosChildSample
 
+	# Testing setup
+	samplePixelCount = childSample.size[0] * childSample.size[1]
+
+	requiredMatch = 0.5
+	bestSamplePositions = []
+
+	bestFullMatch = 0
+	bestFullPosition = ()
+
 	# Width loop.
 	for x in range(0, parWidth):
 
-		if x % 10 == 0:
-			print "Progress:", str(x) + "/" + str(parWidth)
+		if x % 100 == 0:
+			# print "Progress:", str(x) + "/" + str(parWidth)
+			h = hpy()
+			print h.heap()
 
 		# Height loop.
 		for y in range(0, parHeight):
 
-			# Sample parent
+			# Sample parent.
 			parentSample = sampleImage(parentImage, x, y, sampleSize, sampleSize)
 			result = compareImages(childSample, parentSample)
+			parentSample.close()
 
-			# Found a match?
-			if result == 1:
-				print "Match:", x, "x", y
+			# Above requirement?
+			if result / samplePixelCount > requiredMatch:
 
-				# Test full child.
-				parentCrop = sampleImage(parentImage, x - xPosChildSample, y - yPosChildSample, chiWidth, chiHeight)
-				result = compareImages(parentCrop, childImage, 18, 1)
+				bestSamplePositions.append((x, y))
+				log("Samples above req.: " + str(len(bestSamplePositions)))
 
-				# Good?
-				if result == 1:
-					print "Nailed it!"
-					return 1, parentCrop
+	# Loop saved samples.
+	for samPos in bestSamplePositions:
+		cropOrigin = (samPos[0] - xPosChildSample, samPos[1] - yPosChildSample)
 
-	return 0, object()
+		# Test full child.
+		parentCrop = sampleImage(parentImage, cropOrigin[0], cropOrigin[1], chiWidth, chiHeight)
+		result = compareImages(parentCrop, childImage, 20, 1)
+
+		if result > bestFullMatch:
+			
+			# Record new best.
+			bestFullMatch = result
+			bestFullPosition = cropOrigin
+
+			# Log.
+			log("New best: " + str(bestFullMatch))
+
+	if bestFullMatch > 0:
+		parentCrop = sampleImage(parentImage, bestFullPosition[0], bestFullPosition[1], chiWidth, chiHeight)
+		return 1, parentCrop
+
+	return existsInside(childImage, parentImage, depth + 1)
 
 def testSample(sample, variance):
 
 	var =  ImageStat.Stat(sample).var
-
-	print var
-	print variance
 
 	if var[0] + var[1] + var[2] > variance:
 		return 1
@@ -181,7 +214,7 @@ def sampleImage(img, x = 0, y = 0, w = 7, h = 7):
 	return imgSample
 
 
-def compareImages(imgA, imgB, variance = 17, output = 0):
+def compareImages(imgA, imgB, variance = 16, output = 0):
 
 	# Check dimensions are equal.
 	if imgA.size != imgB.size:
@@ -200,6 +233,7 @@ def compareImages(imgA, imgB, variance = 17, output = 0):
 	# Add alpha.
 	fiftyGrey = Image.new("L", imgB.size, 128)
 	imgB.putalpha(fiftyGrey)
+	fiftyGrey.close()
 
 	# Overlay.
 	overlay = Image.alpha_composite(imgA, imgB)
@@ -207,7 +241,6 @@ def compareImages(imgA, imgB, variance = 17, output = 0):
 	# Setup.
 	width = overlay.size[0]
 	height = overlay.size[1]
-	pixelCount = width * height
 	matches = 0
 
 	# Tolerances
@@ -228,23 +261,24 @@ def compareImages(imgA, imgB, variance = 17, output = 0):
 			if lowerTol < pixel[0] < upperTol and lowerTol < pixel[1] < upperTol and lowerTol < pixel[2] < upperTol:
 				matches = matches + 1
 
-	if matches / pixelCount > 0.5:
-		print matches, "matches."
-		print pixelCount, "pixels."
-		print
-
-	if matches == pixelCount:
-		print "Perfect!"
-		return 1
-
 	if output:
-		print matches, "matches."
-		print pixelCount, "pixels."
-		print
-
 		overlay.save(str(matches) + ".jpg")
 
-	return 0
+	# totalPixels = overlay.size[0] * overlay.size[1]
+
+	# if matches / totalPixels > 0.5:
+	# 	log("Matched: " + str(matches) + "/" + str(totalPixels))
+
+	overlay.close()
+
+	return matches
+
+
+def log(line):
+	logFile = open("logFile.txt", "w")
+	logFile.write(line)
+	logFile.write("\n")
+	logFile.close()
 
 
 if __name__ == "__main__":
