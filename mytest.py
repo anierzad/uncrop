@@ -5,14 +5,14 @@ import os
 import time
 import math
 import random
+import gc
 
 from guppy import hpy
 
 from PIL import Image
 from PIL import ImageStat
+from PIL import ImageFilter
 import PIL.ImageOps
-
-logFile = object()
 
 croppedImageDir = ""
 originalImageDir = ""
@@ -25,12 +25,6 @@ def main(argv):
 		print ("Usage: mytest.py CROPPED_DIR ORIGINAL_DIR OUTPUT_DIR")
 		sys.exit(2)
 
-	# Setup logging.
-	global logFile
-	logFile = open("logFile.txt", "w")
-	logFile.truncate()
-	logFile.close()
-
 	# Setup our directories.
 	global croppedImageDir
 	global originalImageDir
@@ -42,15 +36,13 @@ def main(argv):
 
 	# Get list of images in cropped directory.
 	imageList = os.listdir(croppedImageDir)
-	print imageList
-	# processImage(imageList[1])
 
 	# Loop through image names.
 	for imageName in imageList:
 		processImage(imageName)
 
 		# Temporary break to limit to first result.
-		# break
+		break
 
 
 def processImage(imageName):
@@ -63,7 +55,7 @@ def processImage(imageName):
 	result, foundImage = existsInside(croppedImage, originalImage)
 
 	if result == 1:
-		foundImage.save(outputDir + "new" + imageName);
+		foundImage.save(outputDir + "new" + imageName)
 
 	return
 
@@ -79,113 +71,122 @@ def existsInside(childImage, parentImage, depth = 0):
 		print "Parent is smaller than child!"
 		return
 
-	# Aim for 1000 pixels
-	multiplier = 1000.0 / float(parentImage.size[0])
+	# Resize images.
+	originalParent = parentImage
+	originalChild = childImage
 
-	if multiplier < 1.0:
-		aspectRatio = float(parentImage.size[1]) / float(parentImage.size[0])
+	if parentImage.size[0] > 1000:
 
-		parentNeWidth = math.trunc(parentImage.size[0] * multiplier)
-		parentNewSize = (parentNeWidth, int(parentNeWidth * aspectRatio))
-		print parentNewSize
-		parentImage = parentImage.resize(parentNewSize, Image.LANCZOS)
+		originalParent = parentImage
+		originalChild = childImage
 
-		childNewWidth = math.trunc(childImage.size[0] * multiplier)
-		childNewSize = (childNewWidth, int(childNewWidth * aspectRatio))
-		print childNewSize
-		childImage = childImage.resize(childNewSize, Image.LANCZOS)
+		parentImage, multiplier = resizeImage(parentImage, 1000)
+		childImage, multiplier = resizeImage(childImage, int(childImage.size[0] * multiplier))
 
-		parentImage.save("smParent.jpg")
-		childImage.save("smChild.jpg")
+	parentImage.save("smParent.jpg")
+	childImage.save("smChild.jpg")
 
-	# Setup.
-	chiWidth = childImage.size[0]
-	chiHeight = childImage.size[1]
-	parWidth = parentImage.size[0]
-	parHeight = parentImage.size[1]
+	# Get child sample.
+	childImageSize = childImage.size
+	parentImageSize = parentImage.size
 
-	# Get sample size.
-	sampleSize = math.trunc(parWidth * 0.01)
-	print "Sample size:", sampleSize
+	sampleSize = (math.trunc(parentImageSize[0] * 0.03), math.trunc(parentImageSize[0] * 0.03))
 
-	# Sample child.
-	xPosChildSample = 0
-	yPosChildSample = 0
-	attempts = 0
-	variance = 10000
-
-	while 1:
-		childSample = sampleImage(childImage, xPosChildSample, yPosChildSample, sampleSize, sampleSize)
-
-		if testSample(childSample, variance):
-			break
-
-		xPosChildSample = random.randint(0, chiWidth - sampleSize)
-		yPosChildSample = random.randint(0, chiHeight - sampleSize)
-
-		if attempts >= 10:
-			variance = variance - 100
-			attempts = 0
-
-		attempts = attempts + 1
+	childSample, childSampleOrigin = getSample(childImage, sampleSize)
 	
 	childSample.save("childSample.jpg")
 
-	print "Sample origin:", xPosChildSample, "x", yPosChildSample
+	print "Sample origin:", childSampleOrigin
+	print "Sample size:", sampleSize
 
 	# Testing setup
-	samplePixelCount = childSample.size[0] * childSample.size[1]
+	samplePixelCount = sampleSize[0] * sampleSize[1]
 
-	requiredMatch = 0.5
+	requiredMatch = 0.2
 	bestSamplePositions = []
 
 	bestFullMatch = 0
 	bestFullPosition = ()
 
 	# Width loop.
-	for x in range(0, parWidth):
+	for x in range(0, parentImageSize[0] - sampleSize[0]):
 
-		if x % 100 == 0:
-			# print "Progress:", str(x) + "/" + str(parWidth)
-			h = hpy()
-			print h.heap()
+		percentComplete = int((100 * (x / float(parentImageSize[0]))) / 2) + 1
+
+		sys.stdout.write("\rSamples: {2}\t[{0}{1}]".format("=" * percentComplete, "-" * (50 - percentComplete), len(bestSamplePositions)))
+		sys.stdout.flush()
 
 		# Height loop.
-		for y in range(0, parHeight):
+		for y in range(0, parentImageSize[1] - sampleSize[1]):
+
+			testPos = (x, y)
 
 			# Sample parent.
-			parentSample = sampleImage(parentImage, x, y, sampleSize, sampleSize)
-			result = compareImages(childSample, parentSample)
-			parentSample.close()
+			parentSample = sampleImage(parentImage, testPos, sampleSize)
+			result = quickCompare(childSample, parentSample)
 
 			# Above requirement?
-			if result / samplePixelCount > requiredMatch:
+			if result:
 
-				bestSamplePositions.append((x, y))
-				log("Samples above req.: " + str(len(bestSamplePositions)))
+				# Add to samples.
+				bestSamplePositions.append(testPos)
+
+	print
 
 	# Loop saved samples.
 	for samPos in bestSamplePositions:
-		cropOrigin = (samPos[0] - xPosChildSample, samPos[1] - yPosChildSample)
+		cropOrigin = (samPos[0] - childSampleOrigin[0], samPos[1] - childSampleOrigin[1])
 
 		# Test full child.
-		parentCrop = sampleImage(parentImage, cropOrigin[0], cropOrigin[1], chiWidth, chiHeight)
-		result = compareImages(parentCrop, childImage, 20, 1)
+		parentCrop = sampleImage(parentImage, cropOrigin, childImageSize)
+		result = compareImages(parentCrop, childImage, 20, 0)
 
+		# Better than best?
 		if result > bestFullMatch:
 			
 			# Record new best.
 			bestFullMatch = result
 			bestFullPosition = cropOrigin
 
-			# Log.
-			log("New best: " + str(bestFullMatch))
+	# print(gc.get_count())
+	gc.collect()
+	# print(gc.get_count())
 
+	# Got a best match?
 	if bestFullMatch > 0:
-		parentCrop = sampleImage(parentImage, bestFullPosition[0], bestFullPosition[1], chiWidth, chiHeight)
+
+		print "Best match: ({0}/{1}) {2:.2f}%".format(bestFullMatch, childImageSize[0] * childImageSize[1], (float(bestFullMatch) / (childImageSize[0] * childImageSize[1])) * 100)
+		cropOrigin = (math.trunc(bestFullPosition[0] / multiplier), math.trunc(bestFullPosition[1] / multiplier))
+		cropSize = originalChild.size
+
+		parentCrop = sampleImage(originalParent, cropOrigin, cropSize)
 		return 1, parentCrop
 
-	return existsInside(childImage, parentImage, depth + 1)
+	return existsInside(originalChild, originalParent, depth + 1)
+
+def getSample(img, size):
+
+	sample = object()
+	origin = (0, 0)
+	attempts = 0
+	variance = 10000
+
+	while 1:
+		sample = sampleImage(img, origin, size)
+
+		if testSample(sample, variance):
+			break
+
+		origin = (random.randint(0, img.size[0] - size[0]), random.randint(0, img.size[1] - size[1]))
+
+		if attempts >= 10:
+			variance = variance - 100
+			attempts = 0
+
+		attempts = attempts + 1
+
+	return sample, origin
+
 
 def testSample(sample, variance):
 
@@ -197,7 +198,12 @@ def testSample(sample, variance):
 	return 0
 
 
-def sampleImage(img, x = 0, y = 0, w = 7, h = 7):
+def sampleImage(img, origin = (0, 0), size = (10, 10)):
+
+	x = origin[0]
+	y = origin[1]
+	w = size[0]
+	h = size[1]
 
 	# Check image is larger than sample.
 	if img.size[0] < w:
@@ -209,34 +215,65 @@ def sampleImage(img, x = 0, y = 0, w = 7, h = 7):
 
 	# Take sample.
 	imgSample = img.crop(box)
-	imgSample.load()
 
 	return imgSample
 
+def resizeImage(img, toWidth):
+
+	multiplier = toWidth / float(img.size[0])
+	aspectRatio = img.size[1] / float(img.size[0])
+
+	newWidth = math.trunc(img.size[0] * multiplier)
+	newSize = (newWidth, int(newWidth * aspectRatio))
+
+	newImg = img.resize(newSize, Image.LANCZOS)
+
+	return newImg, multiplier
+
+
+def quickCompare(imgA, imgB, variance = 16, divide = (3, 3)):
+
+	# Check dimensions are equal.
+	if imgA.size != imgB.size:
+		print "Images not the same dimensions!"
+		return
+
+	# Setup sectors.
+	samplePoints = []
+	imgSize = imgA.size
+	secSize = (int(float(imgSize[0]) / divide[0]), int(float(imgSize[1]) / divide[1]))
+
+	for xSec in range(0, divide[0]):
+		for ySec in range(0, divide[1]):
+
+			x = (secSize[0] * xSec) + int(secSize[0] / 2.0)
+			y = (secSize[1] * ySec) + int(secSize[1] / 2.0)
+
+			samplePoint = (x, y)
+			samplePoints.append(samplePoint)
+
+	# Sample.
+	for samplePoint in samplePoints:
+
+		imgASam = sampleImage(imgA, samplePoint, (1, 1))
+		imgBSam = sampleImage(imgB, samplePoint, (1, 1))
+
+		result = compareImages(imgASam, imgBSam, 7)
+
+		if result < 1:
+			return 0
+
+	# Good sample!
+	return 1
 
 def compareImages(imgA, imgB, variance = 16, output = 0):
 
 	# Check dimensions are equal.
 	if imgA.size != imgB.size:
 		print "Images not the same dimensions!"
-		print "imgA:", imgA.size
-		print "imgB:", imgB.size
 		return
 
-	# Invert.
-	imgB = PIL.ImageOps.invert(imgB)
-
-	# Convert to RGBA.
-	imgA = imgA.convert("RGBA")
-	imgB = imgB.convert("RGBA")
-
-	# Add alpha.
-	fiftyGrey = Image.new("L", imgB.size, 128)
-	imgB.putalpha(fiftyGrey)
-	fiftyGrey.close()
-
-	# Overlay.
-	overlay = Image.alpha_composite(imgA, imgB)
+	overlay = imageOverlay(imgA, imgB)
 
 	# Setup.
 	width = overlay.size[0]
@@ -266,22 +303,32 @@ def compareImages(imgA, imgB, variance = 16, output = 0):
 
 	# totalPixels = overlay.size[0] * overlay.size[1]
 
-	# if matches / totalPixels > 0.5:
-	# 	log("Matched: " + str(matches) + "/" + str(totalPixels))
-
 	overlay.close()
 
 	return matches
 
+def imageOverlay(imgA, imgB):
 
-def log(line):
-	logFile = open("logFile.txt", "w")
-	logFile.write(line)
-	logFile.write("\n")
-	logFile.close()
+	# Invert.
+	imgB = PIL.ImageOps.invert(imgB)
+
+	# Convert to RGBA.
+	imgA = imgA.convert("RGBA")
+	imgB = imgB.convert("RGBA")
+
+	# Add alpha.
+	fiftyGrey = Image.new("L", imgB.size, 128)
+	imgB.putalpha(fiftyGrey)
+	fiftyGrey.close()
+
+	# Overlay.
+	overlay = Image.alpha_composite(imgA, imgB)
+
+	return overlay
 
 
 if __name__ == "__main__":
+	os.system("clear")
 	startTime = time.time()
 	main(sys.argv[1:])
 	print "--- %s seconds ---" % (time.time() - startTime)
