@@ -12,7 +12,8 @@ from guppy import hpy
 from PIL import Image
 from PIL import ImageStat
 from PIL import ImageFilter
-import PIL.ImageOps
+from PIL import ImageOps
+from PIL import ImageChops
 
 croppedImageDir = ""
 originalImageDir = ""
@@ -42,7 +43,7 @@ def main(argv):
 		processImage(imageName)
 
 		# Temporary break to limit to first result.
-		break
+		# break
 
 
 def processImage(imageName):
@@ -75,12 +76,12 @@ def existsInside(childImage, parentImage, depth = 0):
 	originalParent = parentImage
 	originalChild = childImage
 
-	if parentImage.size[0] > 1000:
+	if parentImage.size[0] > 400:
 
 		originalParent = parentImage
 		originalChild = childImage
 
-		parentImage, multiplier = resizeImage(parentImage, 1000)
+		parentImage, multiplier = resizeImage(parentImage, 400)
 		childImage, multiplier = resizeImage(childImage, int(childImage.size[0] * multiplier))
 
 	parentImage.save("smParent.jpg")
@@ -90,9 +91,12 @@ def existsInside(childImage, parentImage, depth = 0):
 	childImageSize = childImage.size
 	parentImageSize = parentImage.size
 
-	sampleSize = (math.trunc(parentImageSize[0] * 0.03), math.trunc(parentImageSize[0] * 0.03))
+	sampleSize = (math.trunc(parentImageSize[0] * 0.05), math.trunc(parentImageSize[0] * 0.05))
 
-	childSample, childSampleOrigin = getSample(childImage, sampleSize)
+	childSample = childImage
+	childSampleOrigin = (0,0)#getSample(childImage, sampleSize)
+
+	sampleSize = childSample.size
 	
 	childSample.save("childSample.jpg")
 
@@ -111,7 +115,7 @@ def existsInside(childImage, parentImage, depth = 0):
 	# Width loop.
 	for x in range(0, parentImageSize[0] - sampleSize[0]):
 
-		percentComplete = int((100 * (x / float(parentImageSize[0]))) / 2) + 1
+		percentComplete = int((100 * (x / float(parentImageSize[0] - sampleSize[0]))) / 2) + 1
 
 		sys.stdout.write("\rSamples: {2}\t[{0}{1}]".format("=" * percentComplete, "-" * (50 - percentComplete), len(bestSamplePositions)))
 		sys.stdout.flush()
@@ -126,7 +130,7 @@ def existsInside(childImage, parentImage, depth = 0):
 			result = quickCompare(childSample, parentSample)
 
 			# Above requirement?
-			if result:
+			if result == 1:
 
 				# Add to samples.
 				bestSamplePositions.append(testPos)
@@ -139,13 +143,13 @@ def existsInside(childImage, parentImage, depth = 0):
 
 		# Test full child.
 		parentCrop = sampleImage(parentImage, cropOrigin, childImageSize)
-		result = compareImages(parentCrop, childImage, 20, 0)
+		result, matches = compareImages(parentCrop, childImage)
 
 		# Better than best?
-		if result > bestFullMatch:
+		if matches > bestFullMatch:
 			
 			# Record new best.
-			bestFullMatch = result
+			bestFullMatch = matches
 			bestFullPosition = cropOrigin
 
 	# print(gc.get_count())
@@ -154,6 +158,24 @@ def existsInside(childImage, parentImage, depth = 0):
 
 	# Got a best match?
 	if bestFullMatch > 0:
+
+		print "Trying to beat {0} at {1}".format(bestFullMatch, bestFullPosition)
+
+		# Final wiggle!
+		for x in range(bestFullPosition[0] - 5, bestFullPosition[0] + 5):
+			for y in range(bestFullPosition[1] - 5, bestFullPosition[1] + 5):
+				cropOrigin = (x - childSampleOrigin[0], y - childSampleOrigin[1])
+
+				# Test full child.
+				parentCrop = sampleImage(parentImage, cropOrigin, childImageSize)
+				result, matches = compareImages(parentCrop, childImage)
+
+				# Better than best?
+				if matches > bestFullMatch:
+					print "Improved!"
+					# Record new best.
+					bestFullMatch = matches
+					bestFullPosition = cropOrigin
 
 		print "Best match: ({0}/{1}) {2:.2f}%".format(bestFullMatch, childImageSize[0] * childImageSize[1], (float(bestFullMatch) / (childImageSize[0] * childImageSize[1])) * 100)
 		cropOrigin = (math.trunc(bestFullPosition[0] / multiplier), math.trunc(bestFullPosition[1] / multiplier))
@@ -255,10 +277,10 @@ def quickCompare(imgA, imgB, variance = 16, divide = (3, 3)):
 	# Sample.
 	for samplePoint in samplePoints:
 
-		imgASam = sampleImage(imgA, samplePoint, (1, 1))
-		imgBSam = sampleImage(imgB, samplePoint, (1, 1))
+		imgASam = sampleImage(imgA, samplePoint, (10, 10))
+		imgBSam = sampleImage(imgB, samplePoint, (10, 10))
 
-		result = compareImages(imgASam, imgBSam, 7)
+		result, matches = compareImages(imgASam, imgBSam)
 
 		if result < 1:
 			return 0
@@ -266,26 +288,25 @@ def quickCompare(imgA, imgB, variance = 16, divide = (3, 3)):
 	# Good sample!
 	return 1
 
-def compareImages(imgA, imgB, variance = 16, output = 0):
+
+def compareImages(imgA, imgB, output = 0, tolerance = 0.4):
 
 	# Check dimensions are equal.
 	if imgA.size != imgB.size:
 		print "Images not the same dimensions!"
 		return
 
-	overlay = imageOverlay(imgA, imgB)
+	imgDiff = ImageChops.difference(imgA, imgB)
 
 	# Setup.
-	width = overlay.size[0]
-	height = overlay.size[1]
+	width = imgDiff.size[0]
+	height = imgDiff.size[1]
+	pixelCount = width * height
 	matches = 0
-
-	# Tolerances
-	upperTol = 128 + variance
-	lowerTol = 128 - variance
+	variance = 26
 
 	# Load overlay in to an array of pixels.
-	pixels = overlay.load()
+	pixels = imgDiff.load()
 
 	# Width loop.
 	for x in range(0, width):
@@ -295,36 +316,22 @@ def compareImages(imgA, imgB, variance = 16, output = 0):
 			
 			pixel = pixels[x,y]
 
-			if lowerTol < pixel[0] < upperTol and lowerTol < pixel[1] < upperTol and lowerTol < pixel[2] < upperTol:
+			if pixel[0] <= variance and pixel[1] <= variance and pixel[2] <= variance:
 				matches = matches + 1
 
+
+	differences = pixelCount - matches
+
+	avgPixDiff = float(differences) / pixelCount
+
 	if output:
-		overlay.save(str(matches) + ".jpg")
+		imgDiff.save(str(matches) + ".jpg")
+		# print "Average pixel difference:", avgPixDiff
 
-	# totalPixels = overlay.size[0] * overlay.size[1]
+	if avgPixDiff < tolerance:
+		return 1, matches
 
-	overlay.close()
-
-	return matches
-
-def imageOverlay(imgA, imgB):
-
-	# Invert.
-	imgB = PIL.ImageOps.invert(imgB)
-
-	# Convert to RGBA.
-	imgA = imgA.convert("RGBA")
-	imgB = imgB.convert("RGBA")
-
-	# Add alpha.
-	fiftyGrey = Image.new("L", imgB.size, 128)
-	imgB.putalpha(fiftyGrey)
-	fiftyGrey.close()
-
-	# Overlay.
-	overlay = Image.alpha_composite(imgA, imgB)
-
-	return overlay
+	return 0, matches
 
 
 if __name__ == "__main__":
