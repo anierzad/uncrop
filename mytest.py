@@ -43,13 +43,14 @@ def main(argv):
 		processImage(imageName)
 
 		# Temporary break to limit to first result.
-		# break
+		break
 
 
 def processImage(imageName):
 
 	print "Processing:", imageName + "..."
 
+	# Test unscaled.
 	croppedImage = Image.open(croppedImageDir + imageName)
 	originalImage = Image.open(originalImageDir + imageName)
 
@@ -57,15 +58,23 @@ def processImage(imageName):
 
 	if result == 1:
 		foundImage.save(outputDir + "new" + imageName)
+		return 1
 
-	return
+	# Start scaled tests.
+	for width in range(croppedImage.size[0] + 1, originalImage.size[0] - 1):
+
+		resizedOriginal, magnitude = resizeImage(originalImage, width)
+
+		result, foundImage = existsInside(croppedImage, resizedOriginal)
+
+		if result == 1:
+			foundImage.save(outputDir + "new" + imageName)
+			return 1
+
+	# return
 
 
-def existsInside(childImage, parentImage, depth = 0):
-
-	# Time to give up?
-	if depth > 4:
-		return 0, object()
+def existsInside(childImage, parentImage):
 
 	# Check is not smaller than child.
 	if parentImage.size[0] < childImage.size[0] or parentImage.size[1] < childImage.size[1]:
@@ -100,9 +109,6 @@ def existsInside(childImage, parentImage, depth = 0):
 	
 	childSample.save("childSample.jpg")
 
-	print "Sample origin:", childSampleOrigin
-	print "Sample size:", sampleSize
-
 	# Testing setup
 	samplePixelCount = sampleSize[0] * sampleSize[1]
 
@@ -117,7 +123,7 @@ def existsInside(childImage, parentImage, depth = 0):
 
 		percentComplete = int((100 * (x / float(parentImageSize[0] - sampleSize[0]))) / 2) + 1
 
-		sys.stdout.write("\rSamples: {2}\t[{0}{1}]".format("=" * percentComplete, "-" * (50 - percentComplete), len(bestSamplePositions)))
+		sys.stdout.write("\rParent: {3}, Samples: {2}\t[{0}{1}]".format("=" * percentComplete, "-" * (50 - percentComplete), len(bestSamplePositions), originalParent.size))
 		sys.stdout.flush()
 
 		# Height loop.
@@ -172,7 +178,7 @@ def existsInside(childImage, parentImage, depth = 0):
 
 				# Better than best?
 				if matches > bestFullMatch:
-					print "Improved!"
+
 					# Record new best.
 					bestFullMatch = matches
 					bestFullPosition = cropOrigin
@@ -184,7 +190,7 @@ def existsInside(childImage, parentImage, depth = 0):
 		parentCrop = sampleImage(originalParent, cropOrigin, cropSize)
 		return 1, parentCrop
 
-	return existsInside(originalChild, originalParent, depth + 1)
+	return 0, object
 
 def getSample(img, size):
 
