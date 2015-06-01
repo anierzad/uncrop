@@ -54,24 +54,55 @@ def processImage(imageName):
 	croppedImage = Image.open(croppedImageDir + imageName)
 	originalImage = Image.open(originalImageDir + imageName)
 
-	result, foundImage = existsInside(croppedImage, originalImage)
+	result, matches, matchPer, origin = existsInside(croppedImage, originalImage)
 
 	if result == 1:
-		foundImage.save(outputDir + "new" + imageName)
+		print "NO SCALE PASS REQUIRED!"
 		return 1
 
 	# Start scaled tests.
-	for width in range(croppedImage.size[0] + 1, originalImage.size[0] - 1):
+	bestMatch = 0
+	bestMatchPer = 0.0
+	bestMatchPos = (0, 0)
+	bestMatchScale = 0.0
+	bestMatchWidth = 0
 
-		resizedOriginal, magnitude = resizeImage(originalImage, width)
+	inRunOver = False
+	runOverPos = 0
+	runOverMax = 30
 
-		result, foundImage = existsInside(croppedImage, resizedOriginal)
+	for width in range(1240, 1500): #croppedImage.size[0] + 1, originalImage.size[0] - 1):
 
-		if result == 1:
-			foundImage.save(outputDir + "new" + imageName)
-			return 1
+		result, match, matchPer, origin, magnitude = testWidth(width, croppedImage, originalImage)
 
-	# return
+		if result:
+			print "Width {0} matched {1}.".format(width, matchPer)
+
+			bestMatch = match
+			bestMatchPer = matchPer
+			bestMatchPos = origin
+			bestMatchScale = magnitude
+			bestMatchWidth = width
+			inRunOver = True
+
+		if inRunOver:
+			runOverPos = runOverPos + 1
+			if runOverPos >= runOverMax:
+				break
+
+	# Results.
+	print "Would use width {0} which matched {1:.2f}%.".format(bestMatchWidth, bestMatchPer)
+
+def testWidth(width, cImg, oImg):
+
+	resized, magnitude = resizeImage(oImg, width)
+
+	result, match, matchPer, origin = existsInside(cImg, resized)
+
+	if result:
+		return 1, match, matchPer, origin, magnitude
+
+	return 0, match, matchPer, origin, magnitude
 
 
 def existsInside(childImage, parentImage):
@@ -165,7 +196,7 @@ def existsInside(childImage, parentImage):
 	# Got a best match?
 	if bestFullMatch > 0:
 
-		print "Trying to beat {0} at {1}".format(bestFullMatch, bestFullPosition)
+		# print "Trying to beat {0} at {1}".format(bestFullMatch, bestFullPosition)
 
 		# Final wiggle!
 		for x in range(bestFullPosition[0] - 5, bestFullPosition[0] + 5):
@@ -183,14 +214,14 @@ def existsInside(childImage, parentImage):
 					bestFullMatch = matches
 					bestFullPosition = cropOrigin
 
-		print "Best match: ({0}/{1}) {2:.2f}%".format(bestFullMatch, childImageSize[0] * childImageSize[1], (float(bestFullMatch) / (childImageSize[0] * childImageSize[1])) * 100)
+		# print "Best match: ({0}/{1}) {2:.2f}%".format(bestFullMatch, childImageSize[0] * childImageSize[1], (float(bestFullMatch) / (childImageSize[0] * childImageSize[1])) * 100)
+		bestFullMatchPer = (float(bestFullMatch) / (childImageSize[0] * childImageSize[1])) * 100
 		cropOrigin = (math.trunc(bestFullPosition[0] / multiplier), math.trunc(bestFullPosition[1] / multiplier))
 		cropSize = originalChild.size
 
-		parentCrop = sampleImage(originalParent, cropOrigin, cropSize)
-		return 1, parentCrop
+		return 1, bestFullMatch, bestFullMatchPer, bestFullPosition
 
-	return 0, object
+	return 0, object(), object(), object()
 
 def getSample(img, size):
 
