@@ -78,12 +78,21 @@ def processImage(imageName):
 		if result:
 			print "Width {0} matched {1}.".format(width, matchPer)
 
-			bestMatch = match
-			bestMatchPer = matchPer
-			bestMatchPos = origin
-			bestMatchScale = magnitude
-			bestMatchWidth = width
+			# Enter run over.
 			inRunOver = True
+
+			# Better match than current best?
+			if matchPer > bestMatchPer:
+
+				# Set as best.
+				bestMatch = match
+				bestMatchPer = matchPer
+				bestMatchPos = origin
+				bestMatchScale = magnitude
+				bestMatchWidth = width
+
+				# Reset run over.
+				runOverPos = 0
 
 		if inRunOver:
 			runOverPos = runOverPos + 1
