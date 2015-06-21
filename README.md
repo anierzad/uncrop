@@ -5,5 +5,5 @@ I have many images which a long time ago I cropped and resized for a forum threa
 ## Challenges
 
 	* Finding a quick and reliable way to compare two images to see if they are similar
-	* Dealing with JPEG compression which will cause differences between the original and cropped/resized image
+	* Dealing with JPEG compression causing images to differ
 	* Avoiding false matches
