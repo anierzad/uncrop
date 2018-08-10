@@ -161,6 +161,7 @@ def existsInside(childImage, parentImage):
 
 	# Resize images.
 	targetSize = 600
+	multiplier = 1.0
 	originalParent = parentImage
 	originalChild = childImage
 
@@ -328,7 +329,7 @@ def sampleImage(img, origin = (0, 0), size = (10, 10)):
 def resizeImage(img, toWidth):
 
 	scale = toWidth / float(img.size[0])
-	
+
 	newSize = calculateDimensions(img.size, scale)
 
 	newImg = img.resize(newSize, Image.LANCZOS)
@@ -339,21 +340,21 @@ def calculateDimensions(dimensions, scale):
 
 	aspectRatio = float(dimensions[1]) / float(dimensions[0])
 
-	newWidth = math.trunc(dimensions[0] * scale)
+	newWidth = int(round(dimensions[0] * scale))
 
-	newSize = (newWidth, int(newWidth * aspectRatio))
+	newHeight = int(round(newWidth * aspectRatio))
 
-	return newSize
+	return (newWidth, newHeight)
 
 def enlargeDimensions(dimensions, scale):
 
 	aspectRatio = float(dimensions[1]) / float(dimensions[0])
 
-	newWidth = math.trunc(dimensions[0] / scale)
+	newWidth = int(round(dimensions[0] / scale))
 
-	newSize = (newWidth, int(newWidth * aspectRatio))
+	newHeight = int(round(newWidth * aspectRatio))
 
-	return newSize
+	return (newWidth, newHeight)
 
 
 def quickCompare(imgA, imgB, variance = 16, divide = (3, 3)):
